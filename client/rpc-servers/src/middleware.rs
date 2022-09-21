@@ -16,9 +16,9 @@
 // You should have received a copy of the GNU General Public License
 // along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-//! RPC middlware to collect prometheus metrics on RPC calls.
+//! RPC middleware to collect prometheus metrics on RPC calls.
 
-use jsonrpsee::core::middleware::{Headers, HttpMiddleware, MethodKind, Params, WsMiddleware};
+use jsonrpsee::server::logger::{HttpRequest, Logger, MethodKind, Params};
 use prometheus_endpoint::{
 	register, Counter, CounterVec, HistogramOpts, HistogramVec, Opts, PrometheusError, Registry,
 	U64,
@@ -54,10 +54,10 @@ pub struct RpcMetrics {
 	calls_started: CounterVec<U64>,
 	/// Number of calls completed.
 	calls_finished: CounterVec<U64>,
-	/// Number of Websocket sessions opened (Websocket only).
-	ws_sessions_opened: Option<Counter<U64>>,
-	/// Number of Websocket sessions closed (Websocket only).
-	ws_sessions_closed: Option<Counter<U64>>,
+	/// Number of Websocket sessions opened (Websocket or HTTP).
+	sessions_opened: Option<Counter<U64>>,
+	/// Number of Websocket sessions closed (Websocket or HTTP).
+	sessions_closed: Option<Counter<U64>>,
 }
 
 impl RpcMetrics {
@@ -116,7 +116,7 @@ impl RpcMetrics {
 					)?,
 					metrics_registry,
 				)?,
-				ws_sessions_opened: register(
+				sessions_opened: register(
 					Counter::new(
 						"substrate_rpc_sessions_opened",
 						"Number of persistent RPC sessions opened",
@@ -124,7 +124,7 @@ impl RpcMetrics {
 					metrics_registry,
 				)?
 				.into(),
-				ws_sessions_closed: register(
+				sessions_closed: register(
 					Counter::new(
 						"substrate_rpc_sessions_closed",
 						"Number of persistent RPC sessions closed",
@@ -210,11 +210,11 @@ impl RpcMiddleware {
 	}
 }
 
-impl WsMiddleware for RpcMiddleware {
+impl Logger for RpcMiddleware {
 	type Instant = std::time::Instant;
 
-	fn on_connect(&self, _remote_addr: SocketAddr, _headers: &Headers) {
-		self.metrics.ws_sessions_opened.as_ref().map(|counter| counter.inc());
+	fn on_connect(&self, _remote_addr: SocketAddr, _request: &HttpRequest) {
+		self.metrics.sessions_opened.as_ref().map(|counter| counter.inc());
 	}
 
 	fn on_request(&self) -> Self::Instant {
@@ -234,26 +234,6 @@ impl WsMiddleware for RpcMiddleware {
 	}
 
 	fn on_disconnect(&self, _remote_addr: SocketAddr) {
-		self.metrics.ws_sessions_closed.as_ref().map(|counter| counter.inc());
-	}
-}
-
-impl HttpMiddleware for RpcMiddleware {
-	type Instant = std::time::Instant;
-
-	fn on_request(&self, _remote_addr: SocketAddr, _headers: &Headers) -> Self::Instant {
-		self.on_request()
-	}
-
-	fn on_call(&self, name: &str, params: Params, kind: MethodKind) {
-		self.on_call(name, params, kind)
-	}
-
-	fn on_result(&self, name: &str, success: bool, started_at: Self::Instant) {
-		self.on_result(name, success, started_at)
-	}
-
-	fn on_response(&self, _result: &str, started_at: Self::Instant) {
-		self.on_response(_result, started_at)
+		self.metrics.sessions_closed.as_ref().map(|counter| counter.inc());
 	}
 }
