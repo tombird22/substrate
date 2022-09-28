@@ -142,7 +142,12 @@ impl RpcMetrics {
 impl Logger for RpcMetrics {
 	type Instant = std::time::Instant;
 
-	fn on_connect(&self, _remote_addr: SocketAddr, _request: &HttpRequest, transport: TransportProtocol) {
+	fn on_connect(
+		&self,
+		_remote_addr: SocketAddr,
+		_request: &HttpRequest,
+		transport: TransportProtocol,
+	) {
 		if let TransportProtocol::WebSocket = transport {
 			self.ws_sessions_opened.as_ref().map(|counter| counter.inc());
 		}
@@ -165,13 +170,16 @@ impl Logger for RpcMetrics {
 			params,
 			kind,
 		);
-		self
-			.calls_started
-			.with_label_values(&[transport_label, name])
-			.inc();
+		self.calls_started.with_label_values(&[transport_label, name]).inc();
 	}
 
-	fn on_result(&self, name: &str, success: bool, started_at: Self::Instant, transport: TransportProtocol) {
+	fn on_result(
+		&self,
+		name: &str,
+		success: bool,
+		started_at: Self::Instant,
+		transport: TransportProtocol,
+	) {
 		let transport_label = transport_label_str(transport);
 		let micros = started_at.elapsed().as_micros();
 		log::debug!(
@@ -181,13 +189,9 @@ impl Logger for RpcMetrics {
 			name,
 			micros,
 		);
-		self
-			.calls_time
-			.with_label_values(&[transport_label, name])
-			.observe(micros as _);
+		self.calls_time.with_label_values(&[transport_label, name]).observe(micros as _);
 
-		self
-			.calls_finished
+		self.calls_finished
 			.with_label_values(&[
 				transport_label,
 				name,
@@ -210,7 +214,6 @@ impl Logger for RpcMetrics {
 		}
 	}
 }
-
 
 fn transport_label_str(t: TransportProtocol) -> &'static str {
 	match t {

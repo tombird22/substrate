@@ -29,7 +29,7 @@ use jsonrpsee::{
 };
 use std::{error::Error as StdError, net::SocketAddr};
 
-pub use crate::middleware::{RpcMetrics};
+pub use crate::middleware::RpcMetrics;
 use http::header::HeaderValue;
 pub use jsonrpsee::core::{
 	id_providers::{RandomIntegerIdProvider, RandomStringIdProvider},
