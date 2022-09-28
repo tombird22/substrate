@@ -29,7 +29,7 @@ use jsonrpsee::{
 };
 use std::{error::Error as StdError, net::SocketAddr};
 
-pub use crate::middleware::{RpcMetrics, RpcMiddleware};
+pub use crate::middleware::{RpcMetrics};
 use http::header::HeaderValue;
 pub use jsonrpsee::core::{
 	id_providers::{RandomIntegerIdProvider, RandomStringIdProvider},
@@ -126,7 +126,6 @@ pub async fn start_server<M: Send + Sync + 'static>(
 
 	let rpc_api = build_rpc_api(rpc_api);
 	let (handle, addr) = if let Some(metrics) = metrics {
-		let metrics = RpcMiddleware::new(metrics, "ws".into());
 		let builder = builder.set_logger(metrics);
 		let server = builder.build(&addrs[..]).await?;
 		let addr = server.local_addr();
