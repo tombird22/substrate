@@ -37,6 +37,21 @@ use wasm_instrument::parity_wasm::elements::{
 /// compiler toolchains might not support specifying other modules than "env" for memory imports.
 pub const IMPORT_MODULE_MEMORY: &str = "env";
 
+/// Determines whether a module should be instantiated during preparation.
+pub enum TryInstantiate {
+	/// Do the instantation to make sure that the module is valid.
+	///
+	/// This should be used if a module is only uploaded but not executed. We need
+	/// to make sure that it can be actually instantiated.
+	Instantiate,
+	/// Skip the instantation during preparation.
+	///
+	/// This makes sense when the preparation takes place as part of an instantation. Then
+	/// this instantiation would fail the whole transaction and an extra check is not
+	/// necessary.
+	Skip,
+}
+
 struct ContractModule<'a, T: Config> {
 	/// A deserialized module. The module is valid (this is Guaranteed by `new` method).
 	module: elements::Module,
@@ -364,17 +379,81 @@ fn get_memory_limits<T: Config>(
 /// - all imported functions from the external environment matches defined by `env` module,
 ///
 /// The preprocessing includes injecting code for gas metering and metering the height of stack.
-pub fn prepare_contract<E, T: Config>(
+pub fn prepare<E, T: Config>(
 	original_code: CodeVec<T>,
 	schedule: &Schedule<T>,
 	owner: AccountIdOf<T>,
+	try_instantiate: TryInstantiate,
 ) -> Result<PrefabWasmModule<T>, (DispatchError, &'static str)>
 where
 	E: Environment<()>,
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>,
 {
-	let (code, (initial, maximum)) = check_and_instrument::<E, T>(original_code.as_ref(), schedule)
-		.map_err(|msg| (<Error<T>>::CodeRejected.into(), msg))?;
+	use wasmparser::{Validator, WasmFeatures};
+	Validator::new_with_features(WasmFeatures {
+		relaxed_simd: false,
+		threads: false,
+		tail_call: false,
+		multi_memory: false,
+		exceptions: false,
+		memory64: false,
+		extended_const: false,
+		component_model: false,
+		// we disallow floats later on
+		deterministic_only: false,
+		mutable_global: false,
+		saturating_float_to_int: false,
+		sign_extension: false,
+		bulk_memory: false,
+		multi_value: false,
+		reference_types: false,
+		simd: false,
+	})
+	.validate_all(original_code.as_ref())
+	.map_err(|err| {
+		log::debug!(target: "runtime::contracts", "{}", err);
+		(Error::<T>::CodeRejected.into(), "validation of new code failed")
+	})?;
+
+	let (code, (initial, maximum)) = (|| {
+		let contract_module = ContractModule::new(original_code.as_ref(), schedule)?;
+		contract_module.scan_exports()?;
+		contract_module.ensure_no_internal_memory()?;
+		contract_module.ensure_table_size_limit(schedule.limits.table_size)?;
+		contract_module.ensure_global_variable_limit(schedule.limits.globals)?;
+		contract_module.ensure_no_floating_types()?;
+		contract_module.ensure_parameter_limit(schedule.limits.parameters)?;
+		contract_module.ensure_br_table_size_limit(schedule.limits.br_table_size)?;
+
+		// We disallow importing `gas` function here since it is treated as implementation detail.
+		let disallowed_imports = [b"gas".as_ref()];
+		let memory_limits =
+			get_memory_limits(contract_module.scan_imports(&disallowed_imports)?, schedule)?;
+
+		let code = contract_module
+			.inject_gas_metering()?
+			.inject_stack_height_metering()?
+			.into_wasm_code()?;
+
+		Ok((code, memory_limits))
+	})()
+	.map_err(|msg: &str| {
+		log::debug!(target: "runtime::contracts", "new code rejected: {}", msg);
+		(Error::<T>::CodeRejected.into(), msg)
+	})?;
+
+	// This will make sure that the module can be actually run within wasmi:
+	//
+	// - Doesn't use any unknown imports.
+	// - Doesn't explode the wasmi bytecode generation.
+	if matches!(try_instantiate, TryInstantiate::Instantiate) {
+		PrefabWasmModule::<T>::instantiate::<E, _>(original_code.as_ref(), (), (initial, maximum))
+			.map_err(|err| {
+				log::debug!(target: "runtime::contracts", "{}", err);
+				(Error::<T>::CodeRejected.into(), "new code rejected after instrumentation")
+			})?;
+	}
+
 	let original_code_len = original_code.len();
 
 	let mut module = PrefabWasmModule {
@@ -402,57 +481,29 @@ where
 	Ok(module)
 }
 
-/// The same as [`prepare_contract`] but without constructing a new [`PrefabWasmModule`]
+/// Just run the instrumentation without checking the code.
 ///
-/// # Note
-///
-/// Use this when an existing contract should be re-instrumented with a newer schedule version.
-pub fn check_and_instrument<E, T: Config>(
+/// Only run this on already uploaded code which is already validated. This also doesn't
+/// check new newly instrumented code as there is nothing we can do on a failure here
+/// anyways: The code is already deployed and it doesn't matter if it fails here or when
+/// actually running the code.
+pub fn reinstrument<E, T: Config>(
 	original_code: &[u8],
 	schedule: &Schedule<T>,
-) -> Result<(Vec<u8>, (u32, u32)), &'static str>
+) -> Result<Vec<u8>, &'static str>
 where
 	E: Environment<()>,
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>,
 {
-	let result = (|| {
-		let contract_module = ContractModule::new(original_code, schedule)?;
-		contract_module.scan_exports()?;
-		contract_module.ensure_no_internal_memory()?;
-		contract_module.ensure_table_size_limit(schedule.limits.table_size)?;
-		contract_module.ensure_global_variable_limit(schedule.limits.globals)?;
-		contract_module.ensure_no_floating_types()?;
-		contract_module.ensure_parameter_limit(schedule.limits.parameters)?;
-		contract_module.ensure_br_table_size_limit(schedule.limits.br_table_size)?;
-
-		// We disallow importing `gas` function here since it is treated as implementation detail.
-		let disallowed_imports = [b"gas".as_ref()];
-		let memory_limits =
-			get_memory_limits(contract_module.scan_imports(&disallowed_imports)?, schedule)?;
-
-		// We validate the module by instantiating it with an bogus host state object
-		// This will validate the wasm and check that all imported objects are provided
-		// We want to do that before the instrumentation as this requires a valid module
-		PrefabWasmModule::<T>::instantiate::<E, _>(original_code, (), memory_limits).map_err(
-			|msg| {
-				log::debug!(target: "runtime::contracts", "validation failed: {}", msg);
-				"validation failed"
-			},
-		)?;
-
-		let code = contract_module
-			.inject_gas_metering()?
-			.inject_stack_height_metering()?
-			.into_wasm_code()?;
-
-		Ok((code, memory_limits))
-	})();
-
-	if let Err(msg) = &result {
-		log::debug!(target: "runtime::contracts", "CodeRejected: {}", msg);
-	}
-
-	result
+	let contract_module = ContractModule::new(original_code, schedule)?;
+	contract_module
+		.inject_gas_metering()
+		.and_then(|module| module.inject_stack_height_metering())
+		.and_then(|module| module.into_wasm_code())
+		.map_err(|msg| {
+			log::error!(target: "runtime::contracts", "CodeRejected during reinstrument: {}", msg);
+			Error::<T>::CodeRejected.into()
+		})
 }
 
 /// Alternate (possibly unsafe) preparation functions used only for benchmarking.
@@ -466,7 +517,7 @@ pub mod benchmarking {
 	use super::*;
 
 	/// Prepare function that neither checks nor instruments the passed in code.
-	pub fn prepare_contract<T: Config>(
+	pub fn prepare<T: Config>(
 		original_code: Vec<u8>,
 		schedule: &Schedule<T>,
 		owner: AccountIdOf<T>,
@@ -557,7 +608,7 @@ mod tests {
 					},
 					.. Default::default()
 				};
-				let r = prepare_contract::<env::Env, Test>(wasm, &schedule, ALICE);
+				let r = prepare::<env::Env, Test>(wasm, &schedule, ALICE, TryInstantiate::Instantiate);
 				assert_matches::assert_matches!(r.map_err(|(_, msg)| msg), $($expected)*);
 			}
 		};
@@ -693,7 +744,7 @@ mod tests {
 				(func (export "deploy"))
 			)
 			"#,
-			Err("Requested initial number of pages should not exceed the requested maximum")
+			Err("validation of new code failed")
 		);
 
 		prepare_test!(
@@ -759,7 +810,7 @@ mod tests {
 				(func (export "deploy"))
 			)
 			"#,
-			Err("Multiple memory imports defined")
+			Err("validation of new code failed")
 		);
 
 		prepare_test!(
@@ -953,7 +1004,7 @@ mod tests {
 				(func (export "deploy"))
 			)
 			"#,
-			Err("validation failed")
+			Err("new code rejected after instrumentation")
 		);
 	}
 

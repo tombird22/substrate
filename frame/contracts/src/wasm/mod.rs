@@ -28,6 +28,7 @@ mod runtime;
 pub use crate::wasm::code_cache::reinstrument;
 pub use crate::wasm::{
 	env_def::Environment,
+	prepare::TryInstantiate,
 	runtime::{CallFlags, ReturnCode, Runtime, RuntimeCosts},
 };
 use crate::{
@@ -126,11 +127,13 @@ where
 		original_code: Vec<u8>,
 		schedule: &Schedule<T>,
 		owner: AccountIdOf<T>,
+		try_instantiate: TryInstantiate,
 	) -> Result<Self, (DispatchError, &'static str)> {
-		let module = prepare::prepare_contract::<runtime::Env, T>(
+		let module = prepare::prepare::<runtime::Env, T>(
 			original_code.try_into().map_err(|_| (<Error<T>>::CodeTooLarge.into(), ""))?,
 			schedule,
 			owner,
+			try_instantiate,
 		)?;
 		Ok(module)
 	}
@@ -206,7 +209,7 @@ where
 		schedule: &Schedule<T>,
 		owner: T::AccountId,
 	) -> DispatchResult {
-		let executable = prepare::benchmarking::prepare_contract(original_code, schedule, owner)
+		let executable = prepare::benchmarking::prepare(original_code, schedule, owner)
 			.map_err::<DispatchError, _>(Into::into)?;
 		code_cache::store(executable, false)
 	}
@@ -259,7 +262,7 @@ where
 			(self.initial, self.maximum),
 		)
 		.map_err(|msg| {
-			log::error!(target: "runtime::contracts", "existing code rejected: {}", msg);
+			log::debug!(target: "runtime::contracts", "failed to instantiate code: {}", msg);
 			Error::<T>::CodeRejected
 		})?;
 		store.state_mut().set_memory(memory);
@@ -582,8 +585,13 @@ mod tests {
 	fn execute<E: BorrowMut<MockExt>>(wat: &str, input_data: Vec<u8>, mut ext: E) -> ExecResult {
 		let wasm = wat::parse_str(wat).unwrap();
 		let schedule = crate::Schedule::default();
-		let executable = PrefabWasmModule::<<MockExt as Ext>::T>::from_code(wasm, &schedule, ALICE)
-			.map_err(|err| err.0)?;
+		let executable = PrefabWasmModule::<<MockExt as Ext>::T>::from_code(
+			wasm,
+			&schedule,
+			ALICE,
+			TryInstantiate::Skip,
+		)
+		.map_err(|err| err.0)?;
 		executable.execute(ext.borrow_mut(), &ExportedFunction::Call, input_data)
 	}
 

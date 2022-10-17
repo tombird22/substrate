@@ -204,10 +204,8 @@ where
 	// as the contract is already deployed and every change in size would be the result
 	// of changes in the instrumentation algorithm controlled by the chain authors.
 	prefab_module.code = WeakBoundedVec::force_from(
-		prepare::check_and_instrument::<super::runtime::Env, T>(&original_code, schedule)
-			.map(|(code, _)| code)
-			.map_err(|_| <Error<T>>::CodeRejected)?,
-		Some("Contract exceeds limit after re-instrumentation."),
+		prepare::reinstrument::<super::runtime::Env, T>(&original_code, schedule)?,
+		Some("Contract exceeds size limit after re-instrumentation."),
 	);
 	prefab_module.instruction_weights_version = schedule.instruction_weights.version;
 	<CodeStorage<T>>::insert(&prefab_module.code_hash, &*prefab_module);

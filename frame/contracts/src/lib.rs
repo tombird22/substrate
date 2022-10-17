@@ -102,7 +102,7 @@ use crate::{
 	exec::{AccountIdOf, ExecError, Executable, Stack as ExecStack},
 	gas::GasMeter,
 	storage::{meter::Meter as StorageMeter, ContractInfo, DeletedContract, Storage},
-	wasm::{OwnerInfo, PrefabWasmModule},
+	wasm::{OwnerInfo, PrefabWasmModule, TryInstantiate},
 	weights::WeightInfo,
 };
 use codec::{Codec, Encode, HasCompact};
@@ -997,7 +997,8 @@ where
 	) -> CodeUploadResult<CodeHash<T>, BalanceOf<T>> {
 		let schedule = T::Schedule::get();
 		let module =
-			PrefabWasmModule::from_code(code, &schedule, origin).map_err(|(err, _)| err)?;
+			PrefabWasmModule::from_code(code, &schedule, origin, TryInstantiate::Instantiate)
+				.map_err(|(err, _)| err)?;
 		let deposit = module.open_deposit();
 		if let Some(storage_deposit_limit) = storage_deposit_limit {
 			ensure!(storage_deposit_limit >= deposit, <Error<T>>::StorageDepositLimitExhausted);
@@ -1115,11 +1116,16 @@ where
 			let schedule = T::Schedule::get();
 			let (extra_deposit, executable) = match code {
 				Code::Upload(binary) => {
-					let executable = PrefabWasmModule::from_code(binary, &schedule, origin.clone())
-						.map_err(|(err, msg)| {
-							debug_message.as_mut().map(|buffer| buffer.extend(msg.as_bytes()));
-							err
-						})?;
+					let executable = PrefabWasmModule::from_code(
+						binary,
+						&schedule,
+						origin.clone(),
+						TryInstantiate::Skip,
+					)
+					.map_err(|(err, msg)| {
+						debug_message.as_mut().map(|buffer| buffer.extend(msg.as_bytes()));
+						err
+					})?;
 					// The open deposit will be charged during execution when the
 					// uploaded module does not already exist. This deposit is not part of the
 					// storage meter because it is not transferred to the contract but

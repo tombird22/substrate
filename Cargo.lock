@@ -5323,6 +5323,7 @@ dependencies = [
  "sp-std",
  "wasm-instrument",
  "wasmi 0.18.1",
+ "wasmparser-nostd",
  "wat",
 ]
 

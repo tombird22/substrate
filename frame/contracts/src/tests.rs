@@ -3546,10 +3546,31 @@ fn contract_reverted() {
 
 #[test]
 fn code_rejected_error_works() {
-	let (wasm, _) = compile_module::<Test>("invalid_import").unwrap();
 	ExtBuilder::default().existential_deposit(200).build().execute_with(|| {
 		let _ = Balances::deposit_creating(&ALICE, 1_000_000);
 
+		let (wasm, _) = compile_module::<Test>("invalid_module").unwrap();
+		assert_noop!(
+			Contracts::upload_code(RuntimeOrigin::signed(ALICE), wasm.clone(), None),
+			<Error<Test>>::CodeRejected,
+		);
+		let result = Contracts::bare_instantiate(
+			ALICE,
+			0,
+			GAS_LIMIT,
+			None,
+			Code::Upload(wasm),
+			vec![],
+			vec![],
+			true,
+		);
+		assert_err!(result.result, <Error<Test>>::CodeRejected);
+		assert_eq!(
+			std::str::from_utf8(&result.debug_message).unwrap(),
+			"validation of new code failed"
+		);
+
+		let (wasm, _) = compile_module::<Test>("invalid_contract").unwrap();
 		assert_noop!(
 			Contracts::upload_code(RuntimeOrigin::signed(ALICE), wasm.clone(), None),
 			<Error<Test>>::CodeRejected,
@@ -3566,7 +3587,10 @@ fn code_rejected_error_works() {
 			true,
 		);
 		assert_err!(result.result, <Error<Test>>::CodeRejected);
-		assert_eq!(std::str::from_utf8(&result.debug_message).unwrap(), "validation failed");
+		assert_eq!(
+			std::str::from_utf8(&result.debug_message).unwrap(),
+			"call function isn't exported"
+		);
 	});
 }
 
