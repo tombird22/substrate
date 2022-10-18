@@ -32,6 +32,7 @@ use sp_std::prelude::*;
 use wasm_instrument::parity_wasm::elements::{
 	self, External, Internal, MemoryType, Type, ValueType,
 };
+use wasmi::StackLimits;
 
 /// Imported memory must be located inside this module. The reason for hardcoding is that current
 /// compiler toolchains might not support specifying other modules than "env" for memory imports.
@@ -447,11 +448,19 @@ where
 	// - Doesn't use any unknown imports.
 	// - Doesn't explode the wasmi bytecode generation.
 	if matches!(try_instantiate, TryInstantiate::Instantiate) {
-		PrefabWasmModule::<T>::instantiate::<E, _>(original_code.as_ref(), (), (initial, maximum))
-			.map_err(|err| {
-				log::debug!(target: "runtime::contracts", "{}", err);
-				(Error::<T>::CodeRejected.into(), "new code rejected after instrumentation")
-			})?;
+		// We don't actually ever run any code so we can get away with a minimal stack which
+		// reduces the amount of memory that needs to be zeroed.
+		let stack_limits = StackLimits::new(1, 1, 0).expect("initial <= max; qed");
+		PrefabWasmModule::<T>::instantiate::<E, _>(
+			original_code.as_ref(),
+			(),
+			(initial, maximum),
+			stack_limits,
+		)
+		.map_err(|err| {
+			log::debug!(target: "runtime::contracts", "{}", err);
+			(Error::<T>::CodeRejected.into(), "new code rejected after instrumentation")
+		})?;
 	}
 
 	let original_code_len = original_code.len();

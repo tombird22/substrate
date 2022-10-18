@@ -43,7 +43,9 @@ use sp_core::crypto::UncheckedFrom;
 use sp_std::prelude::*;
 #[cfg(test)]
 pub use tests::MockExt;
-use wasmi::{Config as WasmiConfig, Engine, Instance, Linker, Memory, MemoryType, Module, Store};
+use wasmi::{
+	Config as WasmiConfig, Engine, Instance, Linker, Memory, MemoryType, Module, StackLimits, Store,
+};
 
 /// A prepared wasm module ready for execution.
 ///
@@ -170,12 +172,14 @@ where
 		code: &[u8],
 		host_state: H,
 		memory: (u32, u32),
+		stack_limits: StackLimits,
 	) -> Result<(Store<H>, Memory, Instance), wasmi::Error>
 	where
 		E: Environment<H>,
 	{
 		let mut config = WasmiConfig::default();
 		config
+			.set_stack_limits(stack_limits)
 			.wasm_multi_value(false)
 			.wasm_mutable_global(false)
 			.wasm_sign_extension(false)
@@ -260,6 +264,7 @@ where
 			self.code.as_slice(),
 			runtime,
 			(self.initial, self.maximum),
+			StackLimits::default(),
 		)
 		.map_err(|msg| {
 			log::debug!(target: "runtime::contracts", "failed to instantiate code: {}", msg);

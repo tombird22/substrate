@@ -21,7 +21,7 @@ use super::{code::WasmModule, Config};
 /// ! environment that provides the seal interface as imported functions.
 use crate::wasm::{Environment, PrefabWasmModule};
 use sp_core::crypto::UncheckedFrom;
-use wasmi::{errors::LinkerError, Func, Linker, Store};
+use wasmi::{errors::LinkerError, Func, Linker, StackLimits, Store};
 
 /// Minimal execution environment without any imported functions.
 pub struct Sandbox {
@@ -49,9 +49,13 @@ where
 			.as_ref()
 			.map(|mem| (mem.min_pages, mem.max_pages))
 			.unwrap_or((0, 0));
-		let (store, _memory, instance) =
-			PrefabWasmModule::<T>::instantiate::<EmptyEnv, _>(&module.code, (), memory)
-				.expect("Failed to create benchmarking Sandbox instance");
+		let (store, _memory, instance) = PrefabWasmModule::<T>::instantiate::<EmptyEnv, _>(
+			&module.code,
+			(),
+			memory,
+			StackLimits::default(),
+		)
+		.expect("Failed to create benchmarking Sandbox instance");
 		let entry_point = instance.get_export(&store, "call").unwrap().into_func().unwrap();
 		Self { entry_point, store }
 	}
