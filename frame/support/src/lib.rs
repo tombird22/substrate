@@ -2724,13 +2724,13 @@ pub struct StreamReadVec<T> {
 impl<T> StreamReadVec<T> {
 	pub fn new(key: Vec<u8>) -> Result<Self, codec::Error> {
 		let mut input = StorageInput::new(key)?;
-		let length = if input.exists { codec::Compact::<u32>::decode(&mut input)?.0 } else { 0 };
+		let length = if input.exists { dbg!(codec::Compact::<u32>::decode(&mut input)?.0) } else { 0 };
 
 		Ok(Self { marker: sp_std::marker::PhantomData, input, length, read: 0 })
 	}
 }
 
-impl<T: codec::Decode> sp_std::iter::Iterator for StreamReadVec<T> {
+impl<T: codec::Decode + std::fmt::Debug> sp_std::iter::Iterator for StreamReadVec<T> {
 	type Item = T;
 
 	fn next(&mut self) -> Option<T> {
@@ -2744,7 +2744,7 @@ impl<T: codec::Decode> sp_std::iter::Iterator for StreamReadVec<T> {
 	}
 }
 
-impl<T: codec::Decode> StreamRead for Vec<T> {
+impl<T: codec::Decode + std::fmt::Debug> StreamRead for Vec<T> {
 	type Iterator = StreamReadVec<T>;
 
 	fn stream(key: Vec<u8>) -> Self::Iterator {
@@ -2764,7 +2764,7 @@ pub struct StorageInput {
 impl StorageInput {
 	pub fn new(key: Vec<u8>) -> Result<Self, codec::Error> {
 		let (total_length, exists) = if let Some(len) = sp_io::storage::read(&key, &mut [], 0) {
-			dbg!((len, true))
+			(len, true)
 		} else {
 			(0, false)
 		};
@@ -2779,42 +2779,69 @@ impl StorageInput {
 		})
 	}
 
-	fn fill_buffer(&mut self) {
+	fn fill_buffer(&mut self) -> Result<(), codec::Error> {
 		self.buffer.copy_within(self.buffer_pos.., 0);
 		unsafe {
 			self.buffer.set_len(self.buffer.capacity());
 		}
 
-		if let Some(read) =
+		if let Some(after_offset) =
 			sp_io::storage::read(&self.key, &mut self.buffer[self.buffer_pos..], self.offset)
 		{
+			let required_to_read = self.buffer.len() - self.buffer_pos;
+
+			if after_offset < required_to_read as u32 {
+				return Err("Not enough data to fill the buffer".into())
+			}
+
 			unsafe {
 				self.buffer.set_len(sp_std::cmp::min(
-					self.buffer_pos + read as usize,
+					self.buffer_pos + required_to_read as usize,
 					self.buffer.len() - self.buffer_pos,
 				));
 			}
 
-			self.offset += read;
+			self.offset += required_to_read as u32;
 			self.buffer_pos = 0;
+
+			Ok(())
+		} else {
+			Err("Value doesn't exist in the state?".into())
 		}
 	}
 }
 
 impl codec::Input for StorageInput {
 	fn remaining_len(&mut self) -> Result<Option<usize>, codec::Error> {
-		Ok(Some(self.total_length.saturating_sub(self.offset) as usize))
+		Ok(Some(self.total_length.saturating_sub(self.buffer_pos as u32) as usize))
 	}
 
 	fn read(&mut self, into: &mut [u8]) -> Result<(), codec::Error> {
 		if into.len() > self.buffer.capacity() {
-			unimplemented!()
-		} else if dbg!(self.buffer_pos) + dbg!(into.len()) > dbg!(self.buffer.len()) {
-			self.fill_buffer();
+			let remaining_to_read = self.buffer.len() - self.buffer_pos;
+
+			into[..remaining_to_read].copy_from_slice(&self.buffer[self.buffer_pos..]);
+			unsafe { self.buffer.set_len(0); }
+
+			if let Some(after_offset) = sp_io::storage::read(&self.key, &mut into[remaining_to_read..], self.offset) {
+				let required_to_read = (into.len() - remaining_to_read) as u32;
+
+				if after_offset < required_to_read {
+					return Err("Not enough data to fill the buffer".into())
+				}
+
+				self.offset += required_to_read;
+				self.buffer_pos = 0;
+				return Ok(())
+			} else {
+				return Err("Value doesn't exist in the state?".into())
+			}
+		} else if self.buffer_pos + into.len() >= self.buffer.len() {
+			self.fill_buffer()?;
 		}
 
 		let end = self.buffer_pos + into.len();
-		into[..].copy_from_slice(&self.buffer[self.buffer_pos..end]);
+		into.copy_from_slice(&self.buffer[self.buffer_pos..end]);
 		self.buffer_pos = end;
 
 		Ok(())
@@ -2826,10 +2853,18 @@ fn stream_read_test() {
 	#[crate::storage_alias]
 	pub type StreamReadTest = StorageValue<Test, Vec<u32>>;
 
+	#[crate::storage_alias]
+	pub type StreamReadTest2 = StorageValue<Test, Vec<Vec<u8>>>;
+
 	sp_io::TestExternalities::default().execute_with(|| {
 		let data: Vec<u32> = vec![1, 2, 3, 4, 5];
 		StreamReadTest::put(&data);
 
 		assert_eq!(data, StreamReadTest::stream().collect::<Vec<_>>());
+
+		let data: Vec<Vec<u8>> = vec![vec![0; 3000], vec![1; 2500]];
+		StreamReadTest2::put(&data);
+
+		assert_eq!(data, StreamReadTest2::stream().collect::<Vec<_>>());
 	})
 }
