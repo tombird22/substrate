@@ -189,6 +189,8 @@ impl HostFn {
 			let msg = format!("Invalid host function definition. {}", msg);
 			syn::Error::new(span, msg)
 		};
+
+		// process attributes
 		let msg = "only #[version(<u8>)] or #[unstable] attribute is allowed.";
 		let span = item.span();
 		let mut attrs = item.attrs.clone();
@@ -211,16 +213,15 @@ impl HostFn {
 			_ => Err(err(span, msg)),
 		}?;
 
+		// process return type
 		let msg = r#"Should return one of the following:
 				- Result<(), TrapReason>,
 				- Result<ReturnCode, TrapReason>,
 				- Result<u32, TrapReason>"#;
-
 		let ret_ty = match item.clone().sig.output {
 			syn::ReturnType::Type(_, ty) => Ok(ty.clone()),
 			_ => Err(err(span, &msg)),
 		}?;
-
 		match *ret_ty {
 			syn::Type::Path(tp) => {
 				let result = &tp.path.segments.last().ok_or(err(span, &msg))?;
