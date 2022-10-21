@@ -355,7 +355,7 @@ fn expand_impls(def: &mut EnvDef) -> TokenStream2 {
 	let dummy_impls = expand_functions(def, false, quote! { () });
 
 	quote! {
-		impl<'a, E> crate::wasm::env_def::Environment<Runtime<'a, E>> for Env
+		impl<'a, E> crate::wasm::Environment<Runtime<'a, E>> for Env
 		where
 			E: Ext,
 			<E::T as frame_system::Config>::AccountId:
@@ -367,7 +367,7 @@ fn expand_impls(def: &mut EnvDef) -> TokenStream2 {
 			}
 		}
 
-		impl crate::wasm::env_def::Environment<()> for Env
+		impl crate::wasm::Environment<()> for Env
 		{
 			fn define(store: &mut wasmi::Store<()>, linker: &mut wasmi::Linker<()>) -> Result<(), wasmi::errors::LinkerError> {
 				#dummy_impls
@@ -514,7 +514,11 @@ fn expand_functions(
 /// - `Result<u32, TrapReason>`.
 ///
 /// The macro expands to `pub struct Env` declaration, with the following traits implementations:
-/// - `pallet_contracts::wasm::env_def::Environment`
+/// - `pallet_contracts::wasm::Environment<Runtime<E>> where E: Ext`
+/// - `pallet_contracts::wasm::Environment<()>`
+///
+/// The implementation on `()` can be used in places where no `Ext` exists, yet. This is useful
+/// when only checking whether a code can be instantiated without actually executing any code.
 #[proc_macro_attribute]
 pub fn define_env(attr: TokenStream, item: TokenStream) -> TokenStream {
 	if !attr.is_empty() {

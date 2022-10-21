@@ -33,10 +33,19 @@ use sp_core::crypto::UncheckedFrom;
 use sp_io::hashing::{blake2_128, blake2_256, keccak_256, sha2_256};
 use sp_runtime::traits::{Bounded, Zero};
 use sp_std::{fmt, prelude::*};
-use wasmi::{core::HostError, Memory};
+use wasmi::{core::HostError, errors::LinkerError, Linker, Memory, Store};
 
 /// The maximum nesting depth a contract can use when encoding types.
 const MAX_DECODE_NESTING: u32 = 256;
+
+/// Trait implemented by the [`define_env`] macro for the emitted `Env` struct.
+pub trait Environment<HostState> {
+	/// Adds all declared functions to the supplied [`Linker`] and [`Store`].
+	fn define(
+		store: &mut Store<HostState>,
+		linker: &mut Linker<HostState>,
+	) -> Result<(), LinkerError>;
+}
 
 /// Type of a storage key.
 #[allow(dead_code)]

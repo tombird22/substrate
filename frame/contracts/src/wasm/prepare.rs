@@ -22,7 +22,7 @@
 use crate::{
 	chain_extension::ChainExtension,
 	storage::meter::Diff,
-	wasm::{env_def::Environment, OwnerInfo, PrefabWasmModule},
+	wasm::{Environment, OwnerInfo, PrefabWasmModule},
 	AccountIdOf, CodeVec, Config, Error, Schedule,
 };
 use codec::{Encode, MaxEncodedLen};
