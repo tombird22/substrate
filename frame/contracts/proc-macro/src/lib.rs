@@ -383,8 +383,8 @@ fn expand_functions(
 	host_state: TokenStream2,
 ) -> TokenStream2 {
 	let impls = def.host_funcs.iter().map(|f| {
-		// skip the context argument
-		let params = f.item.sig.inputs.iter().skip(1);
+		// skip the context and memory argument
+		let params = f.item.sig.inputs.iter().skip(2);
 		let (module, name, body, wasm_output, output) = (
 			&f.module,
 			&f.name,
@@ -463,7 +463,7 @@ fn expand_functions(
 /// ```nocompile
 /// #[define_env]
 /// pub mod some_env {
-/// 	fn some_host_fn(ctx: Runtime<E>, key_ptr: u32, value_ptr: u32, value_len: u32) -> Result<(), TrapReason> {
+/// 	fn some_host_fn(ctx: Runtime<E>, memory: Memory, key_ptr: u32, value_ptr: u32, value_len: u32) -> Result<(), TrapReason> {
 /// 		ctx.some_host_fn(KeyType::Fix, key_ptr, value_ptr, value_len).map(|_| ())
 /// 	}
 /// }
@@ -478,12 +478,12 @@ fn expand_functions(
 /// #[define_env]
 /// pub mod some_env {
 /// 	#[version(1)]
-/// 	fn some_host_fn(ctx: Runtime<E>, key_ptr: u32, value_ptr: u32, value_len: u32) -> Result<ReturnCode, TrapReason> {
+/// 	fn some_host_fn(ctx: Runtime<E>, memory: Memory, key_ptr: u32, value_ptr: u32, value_len: u32) -> Result<ReturnCode, TrapReason> {
 /// 		ctx.some_host_fn(KeyType::Fix, key_ptr, value_ptr, value_len).map(|_| ())
 /// 	}
 ///
 /// 	#[unstable]
-/// 	fn some_host_fn(ctx: Runtime<E>, key_ptr: u32, value_ptr: u32, value_len: u32) -> Result<u32, TrapReason> {
+/// 	fn some_host_fn(ctx: Runtime<E>, memory: Memory, key_ptr: u32, value_ptr: u32, value_len: u32) -> Result<u32, TrapReason> {
 /// 		ctx.some_host_fn(KeyType::Fix, key_ptr, value_ptr, value_len).map(|_| ())
 /// 	}
 /// }

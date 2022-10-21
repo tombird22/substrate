@@ -587,22 +587,22 @@ mod tests {
 		// implementation from it. So actual implementations doesn't matter.
 		#[define_env]
 		pub mod test_env {
-			fn panic(_ctx: Runtime<E>) -> Result<(), TrapReason> {
+			fn panic(_ctx: Runtime<E>, memory: Memory) -> Result<(), TrapReason> {
 				Ok(())
 			}
 
 			// gas is an implementation defined function and a contract can't import it.
-			fn gas(_ctx: Runtime<E>, _amount: u32) -> Result<(), TrapReason> {
+			fn gas(_ctx: Runtime<E>, memory: Memory, _amount: u32) -> Result<(), TrapReason> {
 				Ok(())
 			}
 
-			fn nop(_ctx: Runtime<E>, _unused: u64) -> Result<(), TrapReason> {
+			fn nop(_ctx: Runtime<E>, memory: Memory, _unused: u64) -> Result<(), TrapReason> {
 				Ok(())
 			}
 
 			// new version of nop with other data type for argument
 			#[version(1)]
-			fn nop(_ctx: Runtime<E>, _unused: i32) -> Result<(), TrapReason> {
+			fn nop(_ctx: Runtime<E>, memory: Memory, _unused: i32) -> Result<(), TrapReason> {
 				Ok(())
 			}
 		}
