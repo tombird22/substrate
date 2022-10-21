@@ -385,9 +385,6 @@ fn expand_functions(
 	let impls = def.host_funcs.iter().map(|f| {
 		// skip the context argument
 		let params = f.item.sig.inputs.iter().skip(1);
-		let param_names = params.clone().filter_map(|p|
-			if let syn::FnArg::Typed(ty) = p { Some(&ty.pat) } else { None }
-		);
 		let (module, name, body, wasm_output, output) = (
 			&f.module,
 			&f.name,
@@ -399,6 +396,11 @@ fn expand_functions(
 			"__unstable__" => quote! { #[cfg(feature = "unstable-interface")] },
 			_ => quote! {},
 		};
+
+		// If we don't expand blocks (implementing for `()`) we change a few things:
+		// - We replace any code by unreachable!
+		// - Allow unused variables as the code that uses is not expanded
+		// - We don't need to map the error as we simply panic if they code would ever be executed
 		let inner = if expand_blocks {
 			quote! { || #output {
 				let (memory, ctx) = __caller__
@@ -410,7 +412,6 @@ fn expand_functions(
 			} }
 		} else {
 			quote! { || -> #wasm_output {
-				#( drop(#param_names); )*
 				unreachable!()
 			} }
 		};
@@ -425,8 +426,16 @@ fn expand_functions(
 				|reason| { reason }
 			}
 		};
+		let allow_unused =  if expand_blocks {
+			quote! { }
+		} else {
+			quote! { #[allow(unused_variables)] }
+		};
+
+
 		quote! {
 			#unstable_feat
+			#allow_unused
 			linker.define(#module, #name, wasmi::Func::wrap(&mut*store, |mut __caller__: wasmi::Caller<#host_state>, #( #params, )*| -> #wasm_output {
 				#[allow(unused_variables)]
 				let mut func = #inner;
