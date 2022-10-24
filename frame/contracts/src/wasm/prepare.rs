@@ -33,6 +33,7 @@ use wasm_instrument::parity_wasm::elements::{
 	self, External, Internal, MemoryType, Type, ValueType,
 };
 use wasmi::StackLimits;
+use wasmparser::{Validator, WasmFeatures};
 
 /// Imported memory must be located inside this module. The reason for hardcoding is that current
 /// compiler toolchains might not support specifying other modules than "env" for memory imports.
@@ -390,7 +391,11 @@ where
 	E: Environment<()>,
 	T::AccountId: UncheckedFrom<T::Hash> + AsRef<[u8]>,
 {
-	use wasmparser::{Validator, WasmFeatures};
+	// Do not enable any features here. Any additional feature needs to be carefully
+	// checked for potential security issues. For example, enabling multi value could lead
+	// to a DoS vector: It breaks our assumption that branch instructions are of constant time.
+	// Depending on the implementation they can linearly depend on the amount of values returned
+	// from a block.
 	Validator::new_with_features(WasmFeatures {
 		relaxed_simd: false,
 		threads: false,
@@ -400,8 +405,10 @@ where
 		memory64: false,
 		extended_const: false,
 		component_model: false,
-		// we disallow floats later on
-		deterministic_only: false,
+		// This is not our only defense: We check for float types later in the preparation
+		// process. Additionally, all instructions explictily  need to have weights assigned
+		// or the deployment will fail. We have none assigned for float instructions.
+		deterministic_only: true,
 		mutable_global: false,
 		saturating_float_to_int: false,
 		sign_extension: false,
