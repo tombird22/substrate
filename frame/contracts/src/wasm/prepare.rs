@@ -581,7 +581,7 @@ mod tests {
 	#[allow(unreachable_code)]
 	mod env {
 		use super::*;
-		use crate::wasm::runtime::{Runtime, TrapReason};
+		use crate::wasm::runtime::TrapReason;
 
 		// Define test environment for tests. We need ImportSatisfyCheck
 		// implementation from it. So actual implementations doesn't matter.

@@ -213,6 +213,13 @@ impl HostFn {
 			_ => Err(err(span, msg)),
 		}?;
 
+		// process arguments: The first and second arg are treated differently (ctx, memory)
+		let first_arg = item.sig.inputs.iter().first();
+		let second_arg = item.sig.inputs.iter().skip(1).first();
+		match (first_arg, second_arg) {
+
+		}
+
 		// process return type
 		let msg = r#"Should return one of the following:
 				- Result<(), TrapReason>,
@@ -352,17 +359,17 @@ fn expand_env(def: &mut EnvDef) -> TokenStream2 {
 /// Generates implementation for every host function, to register it in the contract execution
 /// environment.
 fn expand_impls(def: &mut EnvDef) -> TokenStream2 {
-	let impls = expand_functions(def, true, quote! { Runtime<E> });
+	let impls = expand_functions(def, true, quote! { crate::wasm::Runtime<E> });
 	let dummy_impls = expand_functions(def, false, quote! { () });
 
 	quote! {
-		impl<'a, E> crate::wasm::Environment<Runtime<'a, E>> for Env
+		impl<'a, E> crate::wasm::Environment<crate::wasm::runtime::Runtime<'a, E>> for Env
 		where
 			E: Ext,
 			<E::T as frame_system::Config>::AccountId:
 				sp_core::crypto::UncheckedFrom<<E::T as frame_system::Config>::Hash> + AsRef<[u8]>,
 		{
-			fn define(store: &mut wasmi::Store<Runtime<E>>, linker: &mut wasmi::Linker<Runtime<E>>) -> Result<(), wasmi::errors::LinkerError> {
+			fn define(store: &mut wasmi::Store<crate::wasm::Runtime<E>>, linker: &mut wasmi::Linker<crate::wasm::Runtime<E>>) -> Result<(), wasmi::errors::LinkerError> {
 				#impls
 				Ok(())
 			}
